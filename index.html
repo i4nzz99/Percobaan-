@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Jump Game</title>
+    <style>
+        /* Mengatur tampilan dasar layar penuh */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body {
+            background-color: #0f172a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* Container game yang fleksibel dan beradaptasi dengan layar hp */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 450px;
+            max-height: 850px;
+            background: #000;
+            overflow: hidden;
+        }
+
+        @media (min-width: 451px) {
+            #game-container {
+                border-radius: 16px;
+                height: 90vh;
+                width: calc(90vh * (9/16));
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+            }
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Desain UI Screen (Menu Mulai & Game Over) */
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #ffffff;
+            background: rgba(15, 23, 42, 0.9);
+            z-index: 10;
+            text-align: center;
+            padding: 24px;
+            transition: opacity 0.3s ease;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+            color: #fbbf24;
+            text-shadow: 0 0 10px rgba(251, 191, 36, 0.6);
+            letter-spacing: 2px;
+        }
+
+        p {
+            font-size: 1rem;
+            margin-bottom: 24px;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+
+        .score-info {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            color: #e2e8f0;
+        }
+
+        .score-highlight {
+            color: #fbbf24;
+            font-weight: bold;
+        }
+
+        button {
+            padding: 14px 36px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #0f172a;
+            background-color: #fbbf24;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(251, 191, 36, 0.4);
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        button:active {
+            transform: scale(0.95);
+            background-color: #f59e0b;
+        }
+
+        /* Skor waktu bermain */
+        #score-board {
+            position: absolute;
+            top: 30px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #ffffff;
+            z-index: 5;
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+            pointer-events: none;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- Skor Aktif -->
+        <div id="score-board" class="hidden">0</div>
+
+        <!-- Layar Mulai -->
+        <div id="start-screen" class="screen">
+            <h1>NEON JUMP</h1>
+            <p>Ketuk layar untuk melompat dan menghindari rintangan gerbang neon.</p>
+            <div class="score-info">Skor Terbaik: <span id="start-high-score" class="score-highlight">0</span></div>
+            <button id="start-btn">MULAI GAME</button>
+        </div>
+
+        <!-- Layar Game Over -->
+        <div id="gameover-screen" class="screen hidden">
+            <h1>GAME OVER</h1>
+            <div class="score-info">
+                Skor Anda: <span id="final-score" class="score-highlight">0</span><br>
+                Skor Terbaik: <span id="high-score" class="score-highlight">0</span>
+            </div>
+            <button id="restart-btn">MAIN LAGI</button>
+        </div>
+
+        <!-- Canvas Game -->
+        <canvas id="gameCanvas" width="400" height="700"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameContainer = document.getElementById('game-container');
+
+        // Status Game
+        let gameState = 'START'; // START, PLAYING, GAMEOVER
+        let score = 0;
+        let highScore = localStorage.getItem('neonJumpHighScore') || 0;
+        let frames = 0;
+        let shakeFrames = 0;
+
+        // Sound Synthesizer menggunakan Web Audio API
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(type) {
+            try {
+                initAudio();
+                if (!audioCtx) return;
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'jump') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(350, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(700, audioCtx.currentTime + 0.12);
+                    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.12);
+                } else if (type === 'score') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(550, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(750, audioCtx.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.25);
+                } else if (type === 'crash') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+                    osc.frequency.linearRampToValueAtTime(30, audioCtx.currentTime + 0.35);
+                    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.35);
+                }
+            } catch (e) {
+                // Browser kemungkinan memblokir atau tidak mendukung audio context
+            }
+        }
+
+        // Konstruktor Partikel untuk Efek Visual
+        const particles = [];
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 4 + 2;
+                this.speedX = (Math.random() - 0.7) * 3;
+                this.speedY = (Math.random() - 0.5) * 3;
+                this.color = color || `rgba(251, 191, 36, ${Math.random() * 0.5 + 0.5})`;
+                this.life = 1;
+            }
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 0.025;
+            }
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function spawnBurst(x, y, color, count = 8) {
+            for (let i = 0; i < count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        // Objek Karakter (Karakter Kotak bercahaya)
+        const bird = {
+            x: 100,
+            y: 350,
+            size: 24,
+            velocity: 0,
+            gravity: 0.38,
+            jumpStrength: -6.8,
+            rotation: 0,
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Rotasi berdasarkan kecepatan jatuh
+                this.rotation = Math.min(Math.PI / 4, Math.max(-Math.PI / 7, this.velocity * 0.08));
+                ctx.rotate(this.rotation);
+
+                // Desain Karakter Neon Kuning
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = '#fbbf24';
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillRect(-this.size/2, -this.size/2, this.size, this.size);
+
+                // Mata Karakter
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(this.size/4 - 2, -this.size/3, 4, 6);
+
+                ctx.restore();
+            },
+            update() {
+                if (gameState === 'PLAYING') {
+                    this.velocity += this.gravity;
+                    this.y += this.velocity;
+
+                    // Batas Atas
+                    if (this.y - this.size/2 < 0) {
+                        this.y = this.size/2;
+                        this.velocity = 0;
+                    }
+
+                    // Batas Bawah (Menabrak tanah)
+                    if (this.y + this.size/2 > canvas.height - 40) {
+                        triggerGameOver();
+                    }
+
+                    // Menghasilkan jejak partikel samar saat bergerak
+                    if (frames % 2 === 0) {
+                        particles.push(new Particle(this.x - this.size/2, this.y, 'rgba(251, 191, 36, 0.4)'));
+                    }
+                }
+            },
+            jump() {
+                if (gameState === 'PLAYING') {
+                    this.velocity = this.jumpStrength;
+                    playSound('jump');
+                    spawnBurst(this.x - 10, this.y, 'rgba(251, 191, 36, 0.7)', 5);
+                }
+            }
+        };
+
+        // Rintangan (Gerbang Neon)
+        const pipes = [];
+        const pipeWidth = 60;
+        const pipeGap = 160;
+        const pipeSpeed = 2.8;
+
+        function spawnPipe() {
+            const minHeight = 80;
+            const maxHeight = canvas.height - 40 - pipeGap - minHeight;
+            const topHeight = Math.floor(Math.random() * (maxHeight - minHeight + 1) + minHeight);
+            pipes.push({
+                x: canvas.width,
+                topHeight: topHeight,
+                bottomY: topHeight + pipeGap,
+                passed: false
+            });
+        }
+
+        function drawPipes() {
+            pipes.forEach(pipe => {
+                // Efek Warna Gradien Neon Biru/Sian
+                const gradient = ctx.createLinearGradient(pipe.x, 0, pipe.x + pipeWidth, 0);
+                gradient.addColorStop(0, '#06b6d4');
+                gradient.addColorStop(0.5, '#22d3ee');
+                gradient.addColorStop(1, '#0891b2');
+
+                ctx.fillStyle = gradient;
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#06b6d4';
+
+                // Tiang Atas
+                ctx.fillRect(pipe.x, 0, pipeWidth, pipe.topHeight);
+                // Bibir Tiang Atas
+                ctx.fillStyle = '#22d3ee';
+                ctx.fillRect(pipe.x - 3, pipe.topHeight - 16, pipeWidth + 6, 16);
+
+                // Tiang Bawah
+                ctx.fillStyle = gradient;
+                ctx.fillRect(pipe.x, pipe.bottomY, pipeWidth, canvas.height - 40 - pipe.bottomY);
+                // Bibir Tiang Bawah
+                ctx.fillStyle = '#22d3ee';
+                ctx.fillRect(pipe.x - 3, pipe.bottomY, pipeWidth + 6, 16);
+
+                ctx.shadowBlur = 0; // Reset shadow blur agar tidak mempengaruhi draw lain
+            });
+        }
+
+        function updatePipes() {
+            if (gameState !== 'PLAYING') return;
+
+            // Memunculkan rintangan secara berkala
+            if (frames % 100 === 0) {
+                spawnPipe();
+            }
+
+            for (let i = pipes.length - 1; i >= 0; i--) {
+                const pipe = pipes[i];
+                pipe.x -= pipeSpeed;
+
+                // Deteksi Tabrakan (AABB Collision)
+                const birdLeft = bird.x - bird.size/2 + 3;
+                const birdRight = bird.x + bird.size/2 - 3;
+                const birdTop = bird.y - bird.size/2 + 3;
+                const birdBottom = bird.y + bird.size/2 - 3;
+
+                if (birdRight > pipe.x && birdLeft < pipe.x + pipeWidth) {
+                    if (birdTop < pipe.topHeight || birdBottom > pipe.bottomY) {
+                        triggerGameOver();
+                    }
+                }
+
+                // Deteksi Penambahan Skor
+                if (!pipe.passed && pipe.x + pipeWidth < bird.x) {
+                    pipe.passed = true;
+                    score++;
+                    playSound('score');
+                    document.getElementById('score-board').innerText = score;
+                }
+
+                // Bersihkan rintangan yang keluar layar
+                if (pipe.x + pipeWidth < 0) {
+                    pipes.splice(i, 1);
+                }
+            }
+        }
+
+        // Elemen Latar Belakang (Bintang Bergerak Lambat)
+        const stars = [];
+        for (let i = 0; i < 40; i++) {
+            stars.push({
+                x: Math.random() * 400,
+                y: Math.random() * 660,
+                size: Math.random() * 1.5 + 0.5,
+                speed: Math.random() * 0.15 + 0.05
+            });
+        }
+
+        function drawBackground() {
+            // Gradien langit malam
+            const bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            bgGrad.addColorStop(0, '#020617');
+            bgGrad.addColorStop(1, '#0f172a');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Bintang-bintang
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            stars.forEach(star => {
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (gameState === 'PLAYING') {
+                    star.x -= star.speed;
+                    if (star.x < 0) {
+                        star.x = canvas.width;
+                        star.y = Math.random() * (canvas.height - 40);
+                    }
+                }
+            });
+        }
+
+        function drawGround() {
+            // Lantai Neon Pink
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+
+            // Garis pembatas neon menyala
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ec4899';
+            ctx.fillStyle = '#ec4899';
+            ctx.fillRect(0, canvas.height - 40, canvas.width, 4);
+            ctx.shadowBlur = 0;
+        }
+
+        function handleParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                particles[i].draw();
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // Kendali Alur Permainan
+        function startGame() {
+            gameState = 'PLAYING';
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('gameover-screen').classList.add('hidden');
+            document.getElementById('score-board').classList.remove('hidden');
+        }
+
+        function triggerGameOver() {
+            if (gameState === 'GAMEOVER') return;
+            gameState = 'GAMEOVER';
+            
+            playSound('crash');
+            shakeFrames = 15; // Mengaktifkan efek guncangan layar
+            spawnBurst(bird.x, bird.y, '#f59e0b', 20);
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('neonJumpHighScore', highScore);
+            }
+
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('high-score').innerText = highScore;
+
+            document.getElementById('score-board').classList.add('hidden');
+            document.getElementById('gameover-screen').classList.remove('hidden');
+        }
+
+        function resetGame() {
+            bird.y = 350;
+            bird.velocity = 0;
+            pipes.length = 0;
+            particles.length = 0;
+            score = 0;
+            frames = 0;
+            document.getElementById('score-board').innerText = score;
+        }
+
+        // Loop Animasi Utama
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Penerapan guncangan layar saat mati
+            ctx.save();
+            if (shakeFrames > 0) {
+                const dx = (Math.random() - 0.5) * 8;
+                const dy = (Math.random() - 0.5) * 8;
+                ctx.translate(dx, dy);
+                shakeFrames--;
+            }
+
+            drawBackground();
+            updatePipes();
+            drawPipes();
+            drawGround();
+            handleParticles();
+            bird.update();
+            bird.draw();
+
+            ctx.restore();
+
+            if (gameState === 'PLAYING') {
+                frames++;
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Event Listeners untuk Interaksi Pengguna
+        document.getElementById('start-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            initAudio();
+            startGame();
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            initAudio();
+            resetGame();
+            startGame();
+        });
+
+        // Event Sentuh Layar & Klik Mouse untuk Melompat
+        gameContainer.addEventListener('mousedown', (e) => {
+            bird.jump();
+        });
+
+        gameContainer.addEventListener('touchstart', (e) => {
+            // Mencegah delay sentuh dan zoom default pada browser mobile
+            e.preventDefault();
+            initAudio();
+            bird.jump();
+        }, { passive: false });
+
+        // Tampilkan High Score saat pertama kali loading
+        document.getElementById('start-high-score').innerText = highScore;
+
+        // Mulai loop game
+        gameLoop();
+    </script>
+</body>
+  </html>
